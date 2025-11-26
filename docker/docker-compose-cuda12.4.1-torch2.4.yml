@@ -1,0 +1,39 @@
+version: '3.8'  
+  
+services:  
+  trl-dev:  
+    build:  
+      context: .  
+      dockerfile: Dockerfile-cuda12.4.1-torch2.4  
+    # 或者直接使用本地镜像,不需要 build  
+    # image: your-local-torch-2.4-image:tag  
+    container_name: trl-learning  
+      
+    deploy:  
+      resources:  
+        reservations:  
+          devices:  
+            - driver: nvidia  
+              count: 1  
+              capabilities: [gpu]  
+      
+    shm_size: '16gb'  
+      
+    volumes:  
+      - /home/nvidia/Desktop/trl-0.24.0:/workspace/trl  
+      - ~/Desktop/localmodels:/workspace/models  
+      - /home/nvidia/Desktop/localdatasets:/workspace/data  
+      - /home/nvidia/Desktop/dpanel-datas/trloutputs:/workspace/output  
+      - ~/.cache/huggingface:/root/.cache/huggingface  
+     
+    environment:  
+      - CUDA_VISIBLE_DEVICES=0  
+      - HF_HOME=/root/.cache/huggingface  
+      - TRANSFORMERS_CACHE=/workspace/models  
+      - HF_DATASETS_CACHE=/workspace/data  
+
+      
+    working_dir: /workspace/trl  
+    stdin_open: true  
+    tty: true  
+    network_mode: bridge

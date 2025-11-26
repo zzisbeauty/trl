@@ -93,7 +93,7 @@ class PolicyAndValueWrapper(nn.Module):
 
 
 class PPOTrainer(BaseTrainer):
-    """Trainer for Proximal Policy Optimization (PPO).
+    """ Trainer for Proximal Policy Optimization (PPO).
 
     For details on PPO, see the paper: [Proximal Policy Optimization
     Algorithms](https://huggingface.co/papers/1707.06347).
@@ -462,18 +462,22 @@ class PPOTrainer(BaseTrainer):
             self.state.episode += 1 * args.batch_size
             data = next(iter_dataloader)
             with torch.no_grad():
+                # input data
                 queries = data["input_ids"].to(device)
+
+                # logging :打印原始 prompt  
+                prompt_text = processing_class.batch_decode(queries, skip_special_tokens=True)
+                accelerator.print(f"Original prompts: {prompt_text}")
+
                 context_length = queries.shape[1]
-                responses = []
-                postprocessed_responses = []
-                logprobs = []
-                ref_logprobs = []
-                scores = []
-                sequence_lengths = []
-                values = []
-                with unwrap_model_for_generation(
-                    self.model, self.accelerator, gather_deepspeed3_params=self.args.ds3_gather_for_generation
-                ) as unwrapped_model:
+                responses,postprocessed_responses,logprobs = [],[],[]
+                ref_logprobs, scores, sequence_lengths, values = [], [], [], []
+                
+                # 解包模型用于生成: 使用 unwrap_model_for_generation 上下文管理器
+                with unwrap_model_for_generation(self.model, self.accelerator, gather_deepspeed3_params=self.args.ds3_gather_for_generation) as unwrapped_model:
+                    # batch_generation 方法只负责生成阶段,并不包含所有的 PPO 计算过程，只做两件事: 
+                    # 1 分批调用生成函数: 将大批次分成小批次,调用 generate() 函数生成响应; 2 填充和重塑结果: 将不同长度的生成结果填充到相同长度并返回
+                    # 返回值只有: query_responses: 输入+生成的完整序列  以及  logitss: 生成过程中的 logits
                     query_responses, logitss = batch_generation(
                         unwrapped_model.policy,
                         queries,
@@ -482,45 +486,66 @@ class PPOTrainer(BaseTrainer):
                         generation_config,
                     )
 
+                # logging  打印生成的 response
+                response = query_responses[:, context_length:]
+                response_text = processing_class.batch_decode(response, skip_special_tokens=True)
+                accelerator.print(f"Generated responses:\n{response_text[0]}")
+                # 3. 打印 策略模型的 logitss 的形状信息
+                accelerator.print(f"Logits shape: {logitss.shape}")  # [batch_size, response_length, vocab_size]  
+                accelerator.print(f"Logits sample (first token): {logitss[0, 0, :10]}")  # 前10个词的logits  
+                accelerator.print(f"{'='*80}\n")
+
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
-                    query = queries[i : i + args.local_rollout_forward_batch_size]
+                    # 这行代码只是切片操作,从完整的 query_responses 中取出当前要处理的子集,没有对数据本身做任何修改。
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
-                    response = query_response[:, context_length:]
+                    response = query_response[:, context_length:]  # 只获取策略模型的生成部分
+                    # 获取生成结果: 返回完整的 query-response 序列和对应的 logits
+                    # logitss 是生成过程中每个 token 的 logits 张量。它的形状是 [batch_size, response_length, vocab_size],表示:
+                    # batch_size: 批次大小； response_length: 生成的序列长度； vocab_size: 词汇表大小；每个位置的 logits 是模型对该位置所有可能 token 的未归一化概率分数。
                     logits = logitss[i : i + args.local_rollout_forward_batch_size]
+                    # selective_log_softmax() 函数从 logits 中提取实际生成的 token 的对数概率,用于后续的 PPO 损失计算。 这里计算的是策略模型的对数概率
                     logprob = selective_log_softmax(logits, response)
                     del logits
                     empty_cache()
 
-                    if ref_policy is None:
-                        with self.null_ref_context():
+                    """ 以上，策略模型的输出计算完毕，包括 log logits；   接下来开始做参考吗的计算↓"""
+
+                    # ====================== 2 基于 策略模型 的 query_reponse ，参考模型展开计算
+                    if ref_policy is None:   # 方式 1 : 使用 PEFT 适配器切换  
+                        with self.null_ref_context(): # 计算参考模型的输出；基于 策略模型 的响应结果进行计算，得到 参考模型 的输出
                             ref_output = forward(model.policy, query_response, processing_class.pad_token_id)
-                    else:
+                    else: # 方式 2 : 使用独立的参考模型
                         ref_output = forward(ref_policy, query_response, processing_class.pad_token_id)
                     ref_logits = ref_output.logits[:, context_length - 1 : -1]
                     ref_logits /= args.temperature + 1e-7
-                    ref_logprob = selective_log_softmax(ref_logits, response)
+                    ref_logprob = selective_log_softmax(ref_logits, response) # 计算 参考模型 输出的对数概率； 
                     del ref_output, ref_logits
                     empty_cache()
 
-                    # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
+                    # ======================  ※ 计算价值模型; 价值模型在 PPO 训练中用于 【估计状态价值】, 这属于 Rollout 阶段
+                    unwrapped_value_model = accelerator.unwrap_model(model).value_model # 计算价值估计 (Value Model) - 开始： 使用价值模型估计每个 token 位置的状态价值。
+                    full_value, _, _ = get_reward(unwrapped_value_model, query_response, processing_class.pad_token_id, context_length)
+                    value = full_value[:, context_length - 1 : -1].squeeze(-1) # 计算价值估计 (Value Model) - 结束： 使用价值模型估计每个 token 位置的状态价值。
+
+                    # ====================== # ※ 计算奖励分数 (Reward Model)
+                    
+                    """ 数据处理过程中的一些中间态处理 """
+                    # truncate response after the first occurrence of `stop_token_id`
+                    # 模型可能在生成过程中输出了停止标记(如 EOS token),但由于设置了 max_new_tokens,继续生成了额外的无效 token
                     postprocessed_response = response
                     if self.stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-                        postprocessed_response = truncate_response(
-                            self.stop_token_id, processing_class.pad_token_id, response
-                        )
-
-                    # Response Processing 2. run reward model on the truncated responses
-                    postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
+                        postprocessed_response = truncate_response(self.stop_token_id, processing_class.pad_token_id, response)
+                    # # 找到每个序列中第一个 padding token 的位置, 减 1 得到实际有效序列的长度。 and run value model
                     sequence_length = first_true_indices(postprocessed_response == processing_class.pad_token_id) - 1
-                    unwrapped_value_model = accelerator.unwrap_model(model).value_model
-                    full_value, _, _ = get_reward(
-                        unwrapped_value_model, query_response, processing_class.pad_token_id, context_length
-                    )
-                    value = full_value[:, context_length - 1 : -1].squeeze(-1)
-                    _, score, _ = get_reward(
-                        reward_model, postprocessed_query_response, processing_class.pad_token_id, context_length
-                    )
+                    # 它确保了在大批次训练时,可以将数据分成更小的子批次进行处理； 与 query_response 的切片保持一致,确保数据对齐
+                    query = queries[i : i + args.local_rollout_forward_batch_size]
+                    # 重新拼接 query 和截断后的 response， 将原始 query(prompt)与截断后的 response 拼接,形成完整的输入序列,用于奖励模型评分。
+                    postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
 
+                    """ 开始计算 reward model """
+                    _, score, _ = get_reward(reward_model, postprocessed_query_response, processing_class.pad_token_id, context_length)
+
+                    # ====================== 记录所有结果
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
                     logprobs.append(logprob)
@@ -528,6 +553,7 @@ class PPOTrainer(BaseTrainer):
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                     values.append(value)
+
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
@@ -539,13 +565,18 @@ class PPOTrainer(BaseTrainer):
                 empty_cache()
                 gc.collect()
 
-                # Response Processing 3. Filter completion. Ensure that the sample contains stop_token_id
-                # Completions not passing that filter will receive a lower score.
+                """数据处理过程中的一些中间态处理 ③"""
+                
+                # Response Processing 6. Filter completion. Ensure that the sample contains stop_token_id；Completions not passing that filter will receive a lower score. 
+                # 是 EOS token 过滤和惩罚机制； 应用惩罚: 对没有生成 EOS token 的响应降低奖励分数。 鼓励 model 生成更短的 response
                 contain_eos_token = torch.any(postprocessed_responses == self.processing_class.eos_token_id, dim=-1)
-                if self.args.missing_eos_penalty is not None:
+                if self.args.missing_eos_penalty is not None: # missing_eos_penalty 惩罚参数，必须是正数，因为是从 scores 中减去
                     scores[~contain_eos_token] -= self.args.missing_eos_penalty
                 # accelerator.print(f"{scores=}, {(contain_eos_token.sum() / len(contain_eos_token))=}")
 
+                """数据处理过程中的一些中间态处理 ④"""
+                
+                # 这段代码位于 PPO 训练循环的 Rollout 阶段,在 EOS 惩罚之后,用于创建 padding mask 并屏蔽无效的 token。
                 # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
                 response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
@@ -555,32 +586,36 @@ class PPOTrainer(BaseTrainer):
                 padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
                 values = torch.masked_fill(values, padding_mask_p1, 0)
 
-                # 4. compute rewards
+                # ================ 7. compute rewards ， 即时奖励的计算计算过程，显示了其需要两个组成部分
                 # Formula used by http://joschu.net/blog/kl-approx.html for the k1 and k3 estimators
+                # 7.1 kl 散度的计算
                 logr = ref_logprobs - logprobs
-                kl = -logr if args.kl_estimator == "k1" else (logr.exp() - 1) - logr  # Else statement is k3
-                non_score_reward = -args.kl_coef * kl
+                kl = -logr if args.kl_estimator == "k1" else (logr.exp() - 1) - logr  # Else statement is k3， 即根据 kl_estimator 参数选择 k1 或 k3 估计器计算 KL 散度
+                non_score_reward = -args.kl_coef * kl # non_score_reward: KL 惩罚项,用于最终奖励计算
+                # 7.2 接下来计算即时奖励 rewards
                 rewards = non_score_reward.clone()
                 actual_start = torch.arange(rewards.size(0), device=rewards.device)
                 actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
                 rewards[[actual_start, actual_end]] += scores
 
-                # 5. whiten rewards
+                # 8. whiten rewards
                 if args.whiten_rewards:
                     rewards = masked_whiten(rewards, mask=~padding_mask_p1, shift_mean=False)
                     rewards = torch.masked_fill(rewards, padding_mask_p1, 0)
 
-                # 6. compute advantages and returns
+                # 9. compute advantages and returns； 累积奖励的计算过程如下
                 lastgaelam = 0
                 advantages_reversed = []
                 gen_length = responses.shape[1]
                 for t in reversed(range(gen_length)):
                     nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
-                    delta = rewards[:, t] + args.gamma * nextvalues - values[:, t]
+                    # 计算 TD 误差计算公式； # 这里的 rewards 是每个 token 位置的即时奖励(包含 KL 惩罚和奖励模型评分)
+                    delta = rewards[:, t] + args.gamma * nextvalues - values[:, t] 
                     lastgaelam = delta + args.gamma * args.lam * lastgaelam
                     advantages_reversed.append(lastgaelam)
                 advantages = torch.stack(advantages_reversed[::-1], axis=1)
-                returns = advantages + values
+                returns = advantages + values # # 累积奖励 = 优势函数 + 价值估计; returns 是累积奖励。
+
                 advantages = masked_whiten(advantages, ~padding_mask)
                 advantages = torch.masked_fill(advantages, padding_mask, 0)
                 empty_cache()
@@ -618,41 +653,42 @@ class PPOTrainer(BaseTrainer):
                                 mb_values - args.cliprange_value,
                                 mb_values + args.cliprange_value,
                             )
+
+                            #  Value Loss (价值损失)
                             vf_losses1 = torch.square(vpred - mb_return)
                             vf_losses2 = torch.square(vpredclipped - mb_return)
                             vf_loss_max = torch.max(vf_losses1, vf_losses2)
                             vf_loss = 0.5 * masked_mean(vf_loss_max, ~padding_mask_p1[micro_batch_inds])
-                            vf_clipfrac = masked_mean(
-                                (vf_losses2 > vf_losses1).float(), ~padding_mask_p1[micro_batch_inds]
-                            )
+                            vf_clipfrac = masked_mean((vf_losses2 > vf_losses1).float(), ~padding_mask_p1[micro_batch_inds])
                             logprobs_diff = new_logprobs - mb_logprobs
+
+                            # Policy Loss (策略损失)
                             ratio = torch.exp(logprobs_diff)
                             pg_losses = -mb_advantage * ratio
                             pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                             pg_loss_max = torch.max(pg_losses, pg_losses2)
                             pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
+
+                            # 总损失
                             loss = pg_loss + args.vf_coef * vf_loss
+
+                            # 反向传播
                             accelerator.backward(loss)
                             optimizer.step()
                             optimizer.zero_grad()
                             with torch.no_grad():
-                                pg_clipfrac = masked_mean(
-                                    (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
-                                )
+                                pg_clipfrac = masked_mean((pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds])
                                 prob_dist = torch.nn.functional.softmax(logits, dim=-1)
                                 entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
                                 approxkl = 0.5 * (logprobs_diff**2).mean()
                                 approxkl_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
-                                pg_clipfrac_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
-                                    pg_clipfrac
-                                )
+                                pg_clipfrac_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = (pg_clipfrac)
                                 pg_loss_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
                                 vf_loss_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
-                                vf_clipfrac_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
-                                    vf_clipfrac
-                                )
+                                vf_clipfrac_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = (vf_clipfrac)
                                 entropy_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                                 ratio_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
+                                
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     # del everything and empty cache
@@ -737,6 +773,8 @@ class PPOTrainer(BaseTrainer):
     def generate_completions(self, sampling: bool = False):
         args = self.args
         processing_class = self.processing_class
+        # 生成参数配置， PPO 单独具备，因为 trk PPO 实现时为设计不支持 generation_kwargs 参数,这是设计上的历史遗留
+        # 较新的训练器(GRPO、RLOO、OnlineDPO)在 0.22.0 版本重构时统一了接口设计,都支持 generation_kwargs 参数来提供更灵活的生成配置
         generation_config = GenerationConfig(
             max_new_tokens=self.args.response_length,
             temperature=(0.01 + 1e-7),

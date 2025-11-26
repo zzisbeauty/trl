@@ -28,12 +28,12 @@ class ModelConfig:
 
     Parameters:
         model_name_or_path (`str`, *optional*):
-            Model checkpoint for weights initialization.
+            Model checkpoint for weights initialization. | policy model
         model_revision (`str`, *optional*, defaults to `"main"`):
             Specific model version to use. It can be a branch name, a tag name, or a commit id.
+
         dtype (`Literal["auto", "bfloat16", "float16", "float32"]`, *optional*):
             Override the default `torch.dtype` and load the model under this dtype. Possible values are
-
                 - `"bfloat16"`: `torch.bfloat16`
                 - `"float16"`: `torch.float16`
                 - `"float32"`: `torch.float32`
@@ -43,9 +43,11 @@ class ModelConfig:
             Whether to allow for custom models defined on the Hub in their own modeling files. This option should only
             be set to `True` for repositories you trust and in which you have read the code, as it will execute code
             present on the Hub on your local machine.
+
         attn_implementation (`str`, *optional*):
             Which attention implementation to use. You can run `--attn_implementation=flash_attention_2`, in which case
             you must install this manually by running `pip install flash-attn --no-build-isolation`.
+
         use_peft (`bool`, *optional*, defaults to `False`):
             Whether to use PEFT for training.
         lora_r (`int`, *optional*, defaults to `16`):
@@ -84,6 +86,7 @@ class ModelConfig:
 
     model_name_or_path: Optional[str] = field(
         default=None,
+        # default='/workspace/models/qwen3-0.6B', # 指定一个模型路径
         metadata={"help": "Model checkpoint for weights initialization."},
     )
     model_revision: str = field(

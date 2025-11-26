@@ -292,7 +292,7 @@ class DPOTrainer(BaseTrainer):
 
         # Model and reference model
         if isinstance(model, str):
-            model = create_model_from_path(model, **args.model_init_kwargs or {})
+            model = create_model_from_path(model, **args.model_init_kwargs or {}) # 如果 model 是字符串路径,使用 create_model_from_path() 加载模型
         else:
             if args.model_init_kwargs is not None:
                 logger.warning(
@@ -300,7 +300,7 @@ class DPOTrainer(BaseTrainer):
                     "The `model_init_kwargs` will be ignored."
                 )
         model_id = model.config._name_or_path
-        if isinstance(ref_model, str):
+        if isinstance(ref_model, str): # 如果 ref_model 是字符串路径,同样加载参考模型
             ref_model = create_model_from_path(ref_model, **args.ref_model_init_kwargs or {})
         else:
             if args.ref_model_init_kwargs is not None:
@@ -308,17 +308,17 @@ class DPOTrainer(BaseTrainer):
                     "You passed `ref_model_init_kwargs` to the `DPOConfig`, but your model is already instantiated. "
                     "The `ref_model_init_kwargs` will be ignored."
                 )
-        if ref_model is model:
+        if ref_model is model: # 确保 model 和 ref_model 不是同一个对象,否则抛出错误
             raise ValueError(
                 "`model` and `ref_model` cannot be the same object. If you want `ref_model` to be the "
                 "same as `model`, you can simply omit the `ref_model` argument and it will be created for you."
             )
 
-        # Processing class
-        if processing_class is None:
+        # Processing class   Processing Class (Tokenizer/Processor) 处理 ， 处理文本或多模态数据的 tokenizer/processor
+        if processing_class is None: # 如果未提供 processing_class,从模型 ID 自动加载
             processing_class = AutoProcessor.from_pretrained(model_id)
 
-        # Handle pad token for processors or tokenizers
+        # Handle pad token for processors or tokenizers; 区分 VLM (视觉语言模型) 和纯文本模型,设置 self._is_vlm 标志: True or False
         if isinstance(processing_class, ProcessorMixin):
             tokenizer = processing_class.tokenizer
             self._is_vlm = True
@@ -328,6 +328,7 @@ class DPOTrainer(BaseTrainer):
         else:
             raise TypeError("The `processing_class` must be either a `PreTrainedTokenizerBase` or a `ProcessorMixin`")
 
+        # 将 pad token 转换为 pad_token_id 并验证其存在于词汇表中
         # Get the pad token: if not provided, use the one from the processing class or the eos token
         # if the processing class does not have a pad token.
         if args.padding_value is not None:  # deprecated, will be removed in 0.26.0.
@@ -435,17 +436,18 @@ class DPOTrainer(BaseTrainer):
                 )
         self.padding_free = args.padding_free
 
+        # 设置 DPO 算法的核心参数
         # Since ref_logs are precomputed on the first call to get_train/eval_dataloader
         # keep track of first called to avoid computation of future calls
         self._precomputed_train_ref_log_probs = False
         self._precomputed_eval_ref_log_probs = False
 
-        self.beta = args.beta
-        self.label_smoothing = args.label_smoothing
-        self.loss_type = args.loss_type if isinstance(args.loss_type, list) else [args.loss_type]
-        self.loss_weights = args.loss_weights
+        self.beta = args.beta # DPO 温度参数,控制偏离参考模型的程度
+        self.label_smoothing = args.label_smoothing # 鲁棒 DPO 的平滑参数
+        self.loss_type = args.loss_type if isinstance(args.loss_type, list) else [args.loss_type] # 损失函数类型(支持多种损失函数列表)
+        self.loss_weights = args.loss_weights # 多损失函数的权重
         self.aux_loss_enabled = getattr(model.config, "output_router_logits", False)
-        self.use_weighting = args.use_weighting
+        self.use_weighting = args.use_weighting # 是否使用 WPO 加权
         self.aux_loss_coef = getattr(model.config, "router_aux_loss_coef", 0.0)
         if self.aux_loss_enabled and self.aux_loss_coef == 0.0:
             logger.warning(
@@ -468,7 +470,7 @@ class DPOTrainer(BaseTrainer):
                 raise ValueError("Support for kto_pair has been removed in DPOTrainer. Please use KTOTrainer.")
 
         self._stored_metrics = defaultdict(lambda: defaultdict(list))
-        self.f_divergence_type = args.f_divergence_type
+        self.f_divergence_type = args.f_divergence_type # F-散度类型(如 JS 散度)
         self.f_divergence_params = {FDivergenceConstants.ALPHA_DIVERGENCE_COEF_KEY: args.f_alpha_divergence_coef}
         self.dataset_num_proc = args.dataset_num_proc
 

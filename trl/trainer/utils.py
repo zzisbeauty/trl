@@ -615,7 +615,7 @@ def peft_module_casting_to_bf16(model):
 
 
 def get_quantization_config(model_args: ModelConfig) -> Optional[BitsAndBytesConfig]:
-    if model_args.load_in_4bit:
+    if model_args.load_in_4bit: # 如果 model_args.load_in_4bit=True,创建 4-bit 量化配置
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=model_args.dtype,  # For consistency with model weights, we use the same value as `dtype`
@@ -623,12 +623,12 @@ def get_quantization_config(model_args: ModelConfig) -> Optional[BitsAndBytesCon
             bnb_4bit_use_double_quant=model_args.use_bnb_nested_quant,
             bnb_4bit_quant_storage=model_args.dtype,
         )
-    elif model_args.load_in_8bit:
+    elif model_args.load_in_8bit: # 如果 model_args.load_in_8bit=True,创建 8-bit 量化配置
         quantization_config = BitsAndBytesConfig(
             load_in_8bit=True,
         )
     else:
-        quantization_config = None
+        quantization_config = None # 否则返回 none，即不用量化
 
     return quantization_config
 

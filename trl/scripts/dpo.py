@@ -93,28 +93,41 @@ def main(script_args, training_args, model_args, dataset_args):
     ################
     # Model
     ###################
-    dtype = model_args.dtype if model_args.dtype in ["auto", None] else getattr(torch, model_args.dtype)
-    model_kwargs = dict(
+    dtype = model_args.dtype if model_args.dtype in ["auto", None] else getattr(torch, model_args.dtype) # 数据类型(dtype)配置
+    model_kwargs = dict( # 构建模型加载参数
         revision=model_args.model_revision,
         attn_implementation=model_args.attn_implementation,
         dtype=dtype,
     )
-    quantization_config = get_quantization_config(model_args)
+    quantization_config = get_quantization_config(model_args) # 量化配置处理， get_quantization_config() 检查是否需要量化
     if quantization_config is not None:
         # Passing None would not be treated the same as omitting the argument, so we include it only when valid.
-        model_kwargs["device_map"] = get_kbit_device_map()
-        model_kwargs["quantization_config"] = quantization_config
+        model_kwargs["device_map"] = get_kbit_device_map() # 当量化配置存在时,还需要设置 device_map
+        model_kwargs["quantization_config"] = quantization_config # get_kbit_device_map() 返回当前进程的设备映射,确保量化模型正确分配到 GPU
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained( # 加载策略模型(Policy Model) 这是被训练的模型,DPO 训练会更新它的权重，最终保存的就是这个模型
         model_args.model_name_or_path, trust_remote_code=model_args.trust_remote_code, **model_kwargs
     )
-    peft_config = get_peft_config(model_args)
-    if peft_config is None:
-        ref_model = AutoModelForCausalLM.from_pretrained(
+
+    """
+    下方两个选项的工作原理： 根据 trl/trainer/dpo_trainer.py 中 DPO_trainer 的具体实现：
+        工作原理: 当使用 LoRA 等 PEFT 方法时,可以通过关闭适配器来将策略模型当作参考模型使用,从而节省内存。
+            策略模型 = 基础模型 + LoRA 适配器(开启)
+            参考模型 = 基础模型 + LoRA 适配器(关闭)
+            这样只需要加载一个基础模型,通过切换适配器状态来模拟两个模型。
+        在 DPOTrainer 初始化时,这两个模型会被传入； trl/scripts/dpo.py
+    """
+    peft_config = get_peft_config(model_args) # PEFT 配置检查与参考模型处理；  参考模型 (Reference Model) - ref_model
+    if peft_config is None: # 情况 A：不使用 PEFT (peft_config is None)； 作用: 加载一个独立的参考模型,用于计算 DPO 损失中的基线概率。
+        ref_model = AutoModelForCausalLM.from_pretrained( # 为什么需要: DPO 算法需要计算策略模型和参考模型之间的 KL 散度,防止模型偏离太远。参考模型的权重保持冻结,不会被训练更新。
             model_args.model_name_or_path, trust_remote_code=model_args.trust_remote_code, **model_kwargs
         )
     else:
+        # 情况 B: 使用 PEFT (peft_config is not None)； 作用: 不加载独立的参考模型,而是利用 PEFT 机制。
+        # 工作原理: 当使用 LoRA 等 PEFT 方法时,可以通过关闭适配器来将策略模型当作参考模型使用,从而节省内存。
         ref_model = None
+
+    # DDP 优化设置 (可选)：作用: 这是一个分布式训练优化。 为什么需要: 在使用 PyTorch DDP(Distributed Data Parallel)时,布尔类型的 buffer 可能导致同步问题。通过忽略这些 buffer,可以避免潜在的错误。
     if script_args.ignore_bias_buffers:
         # torch distributed hack
         model._ddp_params_and_buffers_to_ignore = [

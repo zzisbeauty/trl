@@ -180,6 +180,7 @@ class ScriptArguments:
 
     dataset_name: Optional[str] = field(
         default=None,
+        # default='/workspace/data/rl2-dpo-datas-from-hf-ultrafeedback_binarized',
         metadata={"help": "Path or name of the dataset to load. If `datasets` is provided, this will be ignored."},
     )
     dataset_config: Optional[str] = field(
@@ -337,7 +338,7 @@ class TrlParser(HfArgumentParser):
             with open(config_path) as yaml_file:
                 config = yaml.safe_load(yaml_file)
 
-            # Set the environment variables specified in the config file
+            # Set the environment variables specified in the config file； 基于配置文件中的环境变量参数设置具体的环境变量
             if "env" in config:
                 env_vars = config.pop("env", {})
                 if not isinstance(env_vars, dict):
@@ -345,12 +346,12 @@ class TrlParser(HfArgumentParser):
                 for key, value in env_vars.items():
                     os.environ[key] = str(value)
 
-            # Set the defaults from the config values
+            # Set the defaults from the config values；  将 YAML 中的参数设置为解析器的默认值
             config_remaining_strings = self.set_defaults_with_config(**config)
         else:
             config_remaining_strings = []
 
-        # Parse the arguments from the command line
+        # Parse the arguments from the command line； 设置完默认值后,调用父类的 parse_args_into_dataclasses() 解析参数，此时,命令行参数会覆盖配置文件中的值(如果同时提供)
         output = self.parse_args_into_dataclasses(args=args, return_remaining_strings=return_remaining_strings)
 
         # Merge remaining strings from the config file with the remaining strings from the command line
@@ -373,7 +374,7 @@ class TrlParser(HfArgumentParser):
 
         Returns a list of strings that were not consumed by the parser.
         """
-
+        # 1. 对于每个 action,如果其 dest 在配置中存在,就更新其默认值； 2. 对于子解析器(subparsers),递归调用 apply_defaults()； 3. 返回已使用的配置键,未使用的键会作为 remaining_strings 返回
         def apply_defaults(parser, kw):
             used_keys = set()
             for action in parser._actions:

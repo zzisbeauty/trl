@@ -1,0 +1,88 @@
+{
+  // ===============================
+  // TypeScript（保留优化）
+  // ===============================
+  "typescript.tsserver.maxTsServerMemory": 2048,
+  "search.followSymlinks": false,
+  "search.useIgnoreFiles": true,
+
+  // ===============================
+  // Python: 启用 Pylance（正常开发用）
+  // ===============================
+
+  "python.languageServer": "Pylance",
+
+  // 🔥 内存友好的诊断模式
+  "python.analysis.diagnosticMode": "openFilesOnly",  // 只分析已打开文件 → 省 80% 资源
+  "python.analysis.typeCheckingMode": "basic",         // basic 足够；off 太弱
+
+  // 🔥 禁用大部分高占用功能
+  "python.analysis.indexing": false,                   // 禁用索引，大幅降低内存
+  "python.analysis.autoSearchPaths": false,
+  "python.analysis.stubPaths": [],
+  "python.analysis.extraPaths": [],
+  "python.analysis.autoImportCompletions": true,       // 开启；保证写代码体验
+  "python.analysis.completeFunctionParens": true,
+
+  // 🔥 限制内存上限（不会强制触发 swap）
+  "python.analysis.memoryMaxSize": 1024,               // 1GB 更平衡
+
+  // IntelliSense
+  "python.intelliSense.enable": true,
+  "vsintellicode.modify.editor.suggestSelection": "disabled",
+  "vsintellicode.python.completionsEnabled": true,
+
+  // ===============================
+  // 文件排除（你原来的保留）
+  // ===============================
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/venv": true,
+    "**/.venv": true,
+    "**/node_modules": true,
+    "**/.git": true,
+    "**/build": true,
+    "**/dist": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ipynb_checkpoints": true,
+    "**/data": true,
+    "**/logs": true,
+    "**/migrations": true
+  },
+
+  "search.exclude": {
+    "**/venv": true,
+    "**/.venv": true,
+    "**/node_modules": true,
+    "**/__pycache__": true,
+    "**/build": true,
+    "**/dist": true
+  },
+
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.git/**": true,
+    "**/build/**": true,
+    "**/dist/**": true,
+    "**/venv/**": true,
+    "**/.venv/**": true
+  },
+
+  "python.analysis.exclude": [
+    "**/venv",
+    "**/.venv",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/tests/fixtures",
+    "**/data",
+    "**/logs",
+    "**/migrations"
+  ],
+
+  // ===============================
+  // Python Path
+  // ===============================
+  "python.defaultInterpreterPath": "/workspace/trl/.venv/bin/python"
+}

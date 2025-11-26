@@ -21,6 +21,10 @@
 # ]
 # ///
 
+
+""" 这个脚本是针对 TL;DR (太长不看) 摘要任务的 PPO 训练示例。 example_overview.md:55 它展示了如何使用 PPOTrainer 来微调模型，以提高其生成 TL;DR 摘要的能力。
+"""
+
 import os
 import shutil
 
