@@ -2,9 +2,11 @@
 
 此分支学习 DPO 相关内容
 
-### _DPO 训练运行入口_
+
+## DPO 训练运行入口
 
 debug `trl/scripts/dpo.py` with `.vscode/launch.json` dpo settings
+
 
 ## DPO 代码细节 
 
