@@ -9,3 +9,12 @@
 - **这里记录了基于 "奖励思想" 的强化学习算法在 LLM 训练领域的本质**： https://chatgpt.com/s/t_6927f9ebb834819183352e2925ae4dce
 
 - 强化学习的 "奖励" 思想在其他领域下的应用： https://chatgpt.com/s/t_6927f9ebb834819183352e2925ae4dce
+
+
+
+
+### _reference_
+
+- 淘天算法一面：PPO/DPO/GRPO的区别
+
+    https://mp.weixin.qq.com/s/kAkk816mi_XsKuyTOM-VpA?poc_token=HF7c-GijBJNNUoDGVg0UwlRd2XAfilSt-A-S00qA
