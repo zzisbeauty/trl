@@ -819,7 +819,6 @@ class DPOTrainer(BaseTrainer):
     def get_train_dataloader(self) -> DataLoader:
         """
         Returns the training [`~torch.utils.data.DataLoader`].
-
         Subclass of transformers.src.transformers.trainer.get_train_dataloader to precompute `ref_log_probs`.
         """
 
@@ -1086,16 +1085,16 @@ class DPOTrainer(BaseTrainer):
             if self.f_divergence_params and FDivergenceConstants.ALPHA_DIVERGENCE_COEF_KEY in self.f_divergence_params:
                 alpha_coef = float(self.f_divergence_params[FDivergenceConstants.ALPHA_DIVERGENCE_COEF_KEY])
             logits = (cap_exp(rejected_logratios * -alpha_coef) - cap_exp(chosen_logratios * -alpha_coef)) / alpha_coef
-        else:
-            logratios = chosen_logps - rejected_logps
+        else: # 策略模型对优选回答的对数概率 以及 策略模型对劣选回答的对数概率
+            logratios = chosen_logps - rejected_logps  # # 策略模型的概率差异  
             if self.reference_free:
                 ref_logratios = torch.tensor([0], dtype=logratios.dtype, device=logratios.device)
-            else:
-                ref_logratios = ref_chosen_logps - ref_rejected_logps
-
+            else:# 参考模型对优选回答的对数概率 以及 参考模型对劣选回答的对数概率
+                ref_logratios = ref_chosen_logps - ref_rejected_logps # # 参考模型的概率差异  
+            # # 计算概率差异  
             logratios = logratios.to(self.accelerator.device)
             ref_logratios = ref_logratios.to(self.accelerator.device)
-            logits = logratios - ref_logratios
+            logits = logratios - ref_logratios # # 最终 logits, logits 表示 chosen 相对于 rejected 的优势分数
 
             if self.f_divergence_type == FDivergenceType.JS_DIVERGENCE:
                 # The js-divergence formula: log(2 * u / (1 + u))
@@ -1109,9 +1108,9 @@ class DPOTrainer(BaseTrainer):
         # The beta is a temperature parameter for the DPO loss, typically something in the range of 0.1 to 0.5.
         # We ignore the reference model as beta -> 0. The label_smoothing parameter encodes our uncertainty about the
         # labels and calculates a conservative DPO loss.
-        if loss_type == "sigmoid":
+        if loss_type == "sigmoid": # 着重训练模型偏好能力
             losses = (
-                -F.logsigmoid(self.beta * logits) * (1 - self.label_smoothing)
+                - F.logsigmoid(self.beta * logits) * (1 - self.label_smoothing)
                 - F.logsigmoid(-self.beta * logits) * self.label_smoothing
             )
 
@@ -1242,9 +1241,9 @@ class DPOTrainer(BaseTrainer):
 
         return losses, chosen_rewards, rejected_rewards
 
-    def _compute_loss_liger(
-        self, model: nn.Module, batch: dict[str, Union[list, torch.LongTensor]]
-    ) -> dict[str, torch.Tensor]:
+
+    # _compute_loss_liger 是使用 Liger Kernel 优化的损失计算方法
+    def _compute_loss_liger(self, model: nn.Module, batch: dict[str, Union[list, torch.LongTensor]]) -> dict[str, torch.Tensor]:
         unwrapped_model = self.accelerator.unwrap_model(model)
         concatenated_batch = self.concatenated_inputs(batch, padding_value=self.pad_token_id)
 
@@ -1722,13 +1721,13 @@ class DPOTrainer(BaseTrainer):
 
         return output
 
-    def get_batch_loss_metrics(
+    def get_batch_loss_metrics( # 这是 DPO 训练的核心方法
         self,
         model: Union[PreTrainedModel, nn.Module],
         batch: dict[str, Union[list, torch.LongTensor]],
         train_eval: Literal["train", "eval"] = "train",
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Compute the DPO loss and other metrics for the given batch of inputs for train or test."""
+        """ Compute the DPO loss and other metrics for the given batch of inputs for train or test. """
         metrics = {}
 
         if self.args.use_liger_loss:
@@ -1737,13 +1736,14 @@ class DPOTrainer(BaseTrainer):
             chosen_rewards = model_output["chosen_rewards"]
             rejected_rewards = model_output["rejected_rewards"]
         else:
-            model_output = self.concatenated_forward(model, batch)
+            model_output = self.concatenated_forward(model, batch) # 调用 concatenated_forward() 获取策略模型输出
 
             # if ref_chosen_logps and ref_rejected_logps in batch use them, otherwise use the reference model
             if "ref_chosen_logps" in batch and "ref_rejected_logps" in batch:
                 ref_chosen_logps = batch["ref_chosen_logps"]
                 ref_rejected_logps = batch["ref_rejected_logps"]
             else:
+                # compute_ref_log_probs 方法负责计算参考模型对 chosen 和 rejected 响应的对数概率; 支持预计算优化：可在数据加载阶段预先计算并存储到数据集中
                 ref_chosen_logps, ref_rejected_logps = self.compute_ref_log_probs(batch)
 
             # Initialize combined losses
@@ -1754,7 +1754,7 @@ class DPOTrainer(BaseTrainer):
             # Compute losses for each loss type
             for idx, loss_type in enumerate(self.loss_type):
                 # Compute individual loss using standard DPO loss function
-                _losses, _chosen_rewards, _rejected_rewards = self.dpo_loss(
+                _losses, _chosen_rewards, _rejected_rewards = self.dpo_loss( # 调用 dpo_loss() 计算偏好损失
                     model_output["chosen_logps"],
                     model_output["rejected_logps"],
                     ref_chosen_logps,
@@ -1763,12 +1763,12 @@ class DPOTrainer(BaseTrainer):
                     model_output,
                 )
 
-                # Add weighted contributions
+                # Add weighted contributions 融合不同的类型的 loss，因为不同的 loss 训练得到的模型效果是不一样的，这里根据权重做 loss 融合
                 weight = self.loss_weights[idx] if self.loss_weights else 1.0
                 losses = losses + _losses * weight
                 chosen_rewards = chosen_rewards + _chosen_rewards * weight
                 rejected_rewards = rejected_rewards + _rejected_rewards * weight
-
+        # 奖励准确率
         reward_accuracies = (chosen_rewards > rejected_rewards).float()
 
         if self.args.rpo_alpha is not None:
@@ -1810,7 +1810,7 @@ class DPOTrainer(BaseTrainer):
 
         return losses.mean(), metrics
 
-    def compute_loss(
+    def compute_loss( # 重写 - 入口点 -调用 get_batch_loss_metrics
         self,
         model: Union[PreTrainedModel, nn.Module],
         inputs: dict[str, Union[torch.Tensor, Any]],

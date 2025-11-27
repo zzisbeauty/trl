@@ -84,5 +84,12 @@
   // ===============================
   // Python Path
   // ===============================
-  "python.defaultInterpreterPath": "/workspace/trl/.venv/bin/python"
+  "python.defaultInterpreterPath": "/workspace/trl/.venv/bin/python",
+
+  // ===============================
+  // Markdown Paste 插件配置 (新增部分)
+  // ===============================
+  "MarkdownPaste.path": "${workspaceFolder}/_study_logs/assets",
+  "MarkdownPaste.nameBase": "${datetime|yyyyMMDDHHmmss}",
+  "MarkdownPaste.silence": true
 }

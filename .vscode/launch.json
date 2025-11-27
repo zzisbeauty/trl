@@ -1,7 +1,8 @@
 {  
+
+
     "version": "0.2.0",  
-    "configurations": [
-        
+    "configurations": [        
         {  
             "name": "Debug DPO Training",  
             "type": "debugpy",  // python
@@ -13,6 +14,9 @@
             ],  
             "console": "integratedTerminal"  
         },
+
+
+        
         {  
             "name": "Debug PPO Training",  
             "type": "debugpy",  
@@ -56,6 +60,9 @@
             },  
             "cwd": "${workspaceFolder}"  
         },  
+
+
+
         {  
             "name": "Debug PPO with LoRA",  
             "type": "debugpy",  
@@ -85,6 +92,9 @@
             },  
             "cwd": "${workspaceFolder}"  
         },  
+
+
+
         {  
             "name": "Debug PPO TL;DR",  
             "type": "debugpy",  
@@ -107,6 +117,14 @@
                 "PYTHONUNBUFFERED": "1"  
             },  
             "cwd": "${workspaceFolder}"  
-        }  
+        }
+
+
+
+
+
     ]  
+
+
+
 }

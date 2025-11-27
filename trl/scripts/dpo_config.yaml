@@ -3,10 +3,12 @@
 # DatasetMixtureConfig 参数(不是 ScriptArguments)  
 datasets:  
   - path: json  
-    data_files: /workspace/data/rl2-dpo-datas-from-hf-ultrafeedback_binarized/train_dpo.json  
+    # data_files: /workspace/data/rl2-dpo-datas-from-hf-ultrafeedback_binarized/train_dpo.json  
+    data_files: /workspace/trl/_study_logs/datasets/_pro.trl.dpo.data.scripts.dataset_samples.ch.json
     split: train  
   - path: json    
-    data_files: /workspace/data/rl2-dpo-datas-from-hf-ultrafeedback_binarized/val_dpo.json  
+    # data_files: /workspace/data/rl2-dpo-datas-from-hf-ultrafeedback_binarized/val_dpo.json  
+    data_files: /workspace/trl/_study_logs/datasets/_pro.trl.dpo.data.scripts.dataset_samples.ch.val.json
     split: train  
   
 # ScriptArguments 参数  

@@ -111,11 +111,11 @@ def main(script_args, training_args, model_args, dataset_args):
 
     """
     下方两个选项的工作原理： 根据 trl/trainer/dpo_trainer.py 中 DPO_trainer 的具体实现：
-        工作原理: 当使用 LoRA 等 PEFT 方法时,可以通过关闭适配器来将策略模型当作参考模型使用,从而节省内存。
-            策略模型 = 基础模型 + LoRA 适配器(开启)
-            参考模型 = 基础模型 + LoRA 适配器(关闭)
-            这样只需要加载一个基础模型,通过切换适配器状态来模拟两个模型。
-        在 DPOTrainer 初始化时,这两个模型会被传入； trl/scripts/dpo.py
+    工作原理: 当使用 LoRA 等 PEFT 方法时,可以通过关闭适配器来将策略模型当作参考模型使用,从而节省内存。
+        策略模型 = 基础模型 + LoRA 适配器(开启)
+        参考模型 = 基础模型 + LoRA 适配器(关闭)
+    这样只需要加载一个基础模型,通过切换适配器状态来模拟两个模型。
+    在 DPOTrainer 初始化时,这两个模型会被传入； trl/scripts/dpo.py
     """
     peft_config = get_peft_config(model_args) # PEFT 配置检查与参考模型处理；  参考模型 (Reference Model) - ref_model
     if peft_config is None: # 情况 A：不使用 PEFT (peft_config is None)； 作用: 加载一个独立的参考模型,用于计算 DPO 损失中的基线概率。
@@ -136,10 +136,7 @@ def main(script_args, training_args, model_args, dataset_args):
 
     # Load the dataset
     if dataset_args.datasets and script_args.dataset_name:
-        logger.warning(
-            "Both `datasets` and `dataset_name` are provided. The `datasets` argument will be used to load the "
-            "dataset and `dataset_name` will be ignored."
-        )
+        logger.warning("Both `datasets` and `dataset_name` are provided. The `datasets` argument will be used to load the dataset and `dataset_name` will be ignored.")
         dataset = get_dataset(dataset_args)
     elif dataset_args.datasets and not script_args.dataset_name:
         dataset = get_dataset(dataset_args)
@@ -149,6 +146,23 @@ def main(script_args, training_args, model_args, dataset_args):
         )
     else:
         raise ValueError("Either `datasets` or `dataset_name` must be provided.")
+
+
+    import logging  
+    logging.basicConfig(level=logging.INFO)  
+    # 或者使用 logger 的设置  
+    logger.setLevel(logging.INFO)
+
+    # 添加数据日志  
+    if script_args.dataset_train_split in dataset:  
+        train_dataset = dataset[script_args.dataset_train_split]  
+        logger.info(f"Training dataset size: {len(train_dataset)}")  
+        # 打印第一个样本  
+        first_example = train_dataset[0]  
+        logger.info(f"First example structure: {list(first_example.keys())}")  
+        logger.info(f"First example content: {first_example}")  
+    else:  
+        logger.warning(f"Dataset split '{script_args.dataset_train_split}' not found. Available splits: {list(dataset.keys())}")
 
     # Initialize the DPO trainer
     trainer = DPOTrainer(
@@ -194,7 +208,7 @@ if __name__ == "__main__":
     # When using the trl cli, this script may be run with additional arguments, corresponding accelerate arguments.
     # To ensure that their parsing does not interfere with the script arguments, parse the arguments with
     # `return_remaining_strings=True`, then ignore the remaining strings.
-    script_args, training_args, model_args, dataset_args, _ = parser.parse_args_and_config(
-        return_remaining_strings=True
-    )
+    script_args, training_args, model_args, dataset_args, _ = parser.parse_args_and_config(return_remaining_strings=True)
+    ...
+    ...
     main(script_args, training_args, model_args, dataset_args)
