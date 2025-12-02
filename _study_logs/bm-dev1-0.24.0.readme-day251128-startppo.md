@@ -2,7 +2,7 @@
 
 此分支学习 PPO 相关内容
 
-### _todo list_
+### todo list
 
 - [ ] 有文章(https://mp.weixin.qq.com/s/qYX8No9YqBXEbPlNhOvwYg)提出如下概念。这个项目的 PPO 训练有体现这两个模块吗？
 
@@ -18,4 +18,4 @@
 ## PPO 训练运行入口
 
 
-## PPO 代码细节 
+## PPO 代码细节
