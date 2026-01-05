@@ -1,0 +1,127 @@
+{  
+    "version": "0.2.0",  
+    "configurations": [        
+
+        {  
+            "name": "Debug DPO Training",  
+            "type": "debugpy",  // python
+            "request": "launch",
+            "python": "/workspace/trl/.venv/bin/python",
+            "program": "${workspaceFolder}/trl/scripts/dpo.py",  
+            "args": [  
+                "--config", "/workspace/trl/trl/scripts/dpo_config.yaml"  
+            ],  
+            "console": "integratedTerminal"  
+        },
+
+        {  
+            "name": "Debug PPO Training",   // 此配置并未指定 use_peft，因此不会使用 lora 方案展开训练
+            "type": "debugpy",  
+            "request": "launch",  
+            "program": "${workspaceFolder}/examples/scripts/ppo/ppo.py",  
+            "console": "integratedTerminal",  
+            "justMyCode": false,  
+            "args": [  
+                "--model_name_or_path", "/workspace/models/qwen2.5-0.5b-instruct",   // policy model
+                "--sft_model_path", "/workspace/models/qwen2.5-0.5b-instruct",
+                "--reward_model_path", "/workspace/models/qwen2.5-0.5b-instruct",   
+
+                "--dataset_name", "trl-internal-testing/descriptiveness-sentiment-trl-style",  
+                "--dataset_train_split", "descriptiveness", // descriptiveness: 用于训练模型生成更具描述性的语言
+                "--dataset_train_split", "sentiment", // sentiment: 用于训练模型生成更积极情感的文本
+
+                // 训练参数控制
+                // "--attn_implementation", "flash_attention_2", // 对于现代训练,特别是使用 padding-free 或 packing 时,建议显式设置
+                "--per_device_train_batch_size", "1",  // 每次1条数据
+                "--gradient_accumulation_steps", "1",   // 不累积梯度  
+                // local_batch_size = per_device_train_batch_size × gradient_accumulation_steps = 1 × 1 = 1
+                // batch_size = local_batch_size × world_size = 1 × 1 = 1 (单卡)
+                // mini_batch_size = batch_size / num_mini_batches = 1 / 1 = 1
+                "--num_mini_batches", "1",              // 不分割 mini-batch 
+                "--learning_rate", "3e-6",  
+                "--num_ppo_epochs", "1",  
+                "--total_episodes", "10",   // 训练的总样本数, num_total_batches = total_episodes / batch_size
+                "--response_length", "32",  
+
+                // 模型精度控制
+                "--bf16", "false",  // 添加这一行
+                "--fp16", "true",  //  and 使用 fp16 代替 bf16 
+                // "--fp16", "false",  // 同时禁用 fp16    此时使用 FP32 全精度训练
+                // "--load_in_4bit", "true",  // 启用 4-bit 量化 
+                // "--bnb_4bit_quant_type", "nf4",  // 使用 NF4 量化类型 
+                // "--use_bnb_nested_quant", "true",  // 启用嵌套量化 
+
+                // 其他控制
+                "--output_dir", "./output/ppo_debug",  
+                "--report_to", "none",  
+                "--logging_steps", "1"  ,
+
+                // 生成长度控制训练
+                "--missing_eos_penalty", "1",
+            ],  
+            "env": {  
+                "CUDA_LAUNCH_BLOCKING": "1",  // 添加这一行  
+                "CUDA_VISIBLE_DEVICES": "0",  
+                "PYTHONUNBUFFERED": "1"  
+            },  
+            "cwd": "${workspaceFolder}"  
+        },  
+
+        {  
+            "name": "Debug PPO with LoRA",  
+            "type": "debugpy",  
+            "request": "launch",  
+            "program": "${workspaceFolder}/examples/scripts/ppo/ppo.py",  
+            "console": "integratedTerminal",  
+            "justMyCode": false,  
+            "args": [  
+                "--model_name_or_path", "qwen-2.5-0.5b",  
+                "--sft_model_path", "qwen-2.5-0.5b",  
+                "--reward_model_path", "EleutherAI/pythia-160m",  
+                "--output_dir", "./output/ppo_lora_debug",  
+                "--per_device_train_batch_size", "4",  
+                "--gradient_accumulation_steps", "2",  
+                "--learning_rate", "3e-6",  
+                "--num_ppo_epochs", "2",  
+                "--total_episodes", "50",  
+                "--response_length", "64",  
+                "--use_peft",  
+                "--lora_r", "16",  
+                "--lora_alpha", "32",  
+                "--report_to", "none"  
+            ],  
+            "env": {  
+                "CUDA_VISIBLE_DEVICES": "0",  
+                "PYTHONUNBUFFERED": "1"  
+            },  
+            "cwd": "${workspaceFolder}"  
+        },  
+
+        {  
+            "name": "Debug PPO TL;DR",  
+            "type": "debugpy",  
+            "request": "launch",  
+            "program": "${workspaceFolder}/examples/scripts/ppo/ppo_tldr.py",  
+            "console": "integratedTerminal",  
+            "justMyCode": false,  
+            "args": [  
+                "--model_name_or_path", "EleutherAI/pythia-1b-deduped",  
+                "--sft_model_path", "EleutherAI/pythia-1b-deduped",  
+                "--reward_model_path", "EleutherAI/pythia-1b-deduped",  
+                "--output_dir", "./output/ppo_tldr_debug",  
+                "--per_device_train_batch_size", "2",  
+                "--gradient_accumulation_steps", "2",  
+                "--total_episodes", "20",  
+                "--report_to", "none"  
+            ],  
+            "env": {  
+                "CUDA_VISIBLE_DEVICES": "0",  
+                "PYTHONUNBUFFERED": "1"  
+            },  
+            "cwd": "${workspaceFolder}"  
+        }
+
+
+    ]  
+
+}

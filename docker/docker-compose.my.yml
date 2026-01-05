@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  trl:
+    image: rlimage:std
+    container_name: trl
+    restart: "no"
+    tty: true
+    stdin_open: true
+    volumes:
+      - /home/nvidia/Desktop/volumes-codes/trl:/workspace/trl
+      - /home/nvidia/Desktop/volumes-cache/trl:/workspace/cache
+      - /home/nvidia/Desktop/volumes-datas:/workspace/data
+      - /home/nvidia/Desktop/volumes-models:/workspace/models
+    networks:
+      - llm-agents
+    environment:
+      - PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+      - PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+
+networks:
+  llm-agents:
+    external: true
+
+# docker-compose up -d
